@@ -11,6 +11,7 @@ from typing import Any, Literal, Protocol, TypeAlias
 import etils.epath as epath
 import flax.nnx as nnx
 from typing_extensions import override
+import openpi.policies.umi_policy as umi_policy
 import tyro
 
 import openpi.models.model as _model
@@ -84,7 +85,7 @@ class DataConfig:
     # Names of keys that will be used by the data loader to generate the action sequence. The length of the
     # sequence is defined by the `action_horizon` field in the model config. This should be adjusted if your
     # LeRobot dataset is using different keys to represent the action.
-    action_sequence_keys: Sequence[str] = ("actions",)
+    action_sequence_keys: Sequence[str] = ("action",)
 
     # If true, will use the LeRobot dataset task to define the prompt.
     prompt_from_task: bool = False
@@ -301,10 +302,10 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
             inputs=[
                 _transforms.RepackTransform(
                     {
-                        "observation/image": "image",
-                        "observation/wrist_image": "wrist_image",
-                        "observation/state": "state",
-                        "actions": "actions",
+                        "observation/image": "observation.images.front",
+                        # "observation/wrist_image": "wrist_image",
+                        "observation/state": "observation.state",
+                        "actions": "action",
                         "prompt": "prompt",
                     }
                 )
@@ -352,7 +353,93 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
             data_transforms=data_transforms,
             model_transforms=model_transforms,
         )
+@dataclasses.dataclass(frozen=True)
+class LeRobotUmiDataConfig(DataConfigFactory):
+    """
+    Configures transforms for the Umi (UMI) dataset structure.
+    It adapts the provided features (e.g., dual-arm state, wrist images) 
+    to the keys expected by the LeRobot policy framework.
+    """
 
+    extra_delta_transform: bool = False
+    
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        
+        # --- 1. Repack Transform (Dataset Keys -> Policy Keys) ---
+        # Remaps the keys in your dataset (e.g., "observation.images.left_wrist") 
+        # to the keys expected by the policy ("observation.images.wrist_l", "action").
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        # State Observation: Maps to the standard 'observation.state'
+                        "observation/state": "observation.state",  
+
+                        # Actions: Maps to the standard 'action'
+                        "actions": "action",  
+
+                        # Wrist Images (Adapted for UMI's dual-arm naming convention)
+                        # NOTE: Assuming your policy/model expects these specific keys 
+                        # for left/right wrist images.
+                        "observation/images/left_wrist": "observation.images.left_wrist", 
+                        "observation/images/right_wrist": "observation.images.right_wrist", 
+                        
+                        # Add prompt if applicable, though not explicitly in your features list
+                        "prompt": "prompt", 
+                    }
+                )
+            ]
+        )
+
+        # --- 2. Data Transforms (Pre-processing for Input/Output) ---
+        # These are applied to the data during training AND inference.
+        # We reuse the generic Libero inputs/outputs for simplicity, 
+        # but you might need Umi-specific versions if they exist.
+        data_transforms = _transforms.Group(
+            inputs=[umi_policy.UMIInputs(model_type=model_config.model_type)],
+            outputs=[umi_policy.UMIOutputs()],
+        )
+
+        # Optional Delta Action Conversion (Reused logic from Libero base config)
+        if self.extra_delta_transform:
+            # Your state/action has 16 dimensions (8 for left arm, 8 for right arm).
+            # If the actions are absolute, we convert the first 7 (x,y,z,qx,qy,qz,qw) of 
+            # *each* arm to delta, leaving the gripper (8th dim) as absolute.
+            # Total 16 dimensions: [7 delta] + [1 gripper] + [7 delta] + [1 gripper]
+            delta_action_mask = _transforms.make_bool_mask(7, -1) + _transforms.make_bool_mask(7, -1)
+            
+            # The mask needs to be 16 elements long: 7 True, 1 False, 7 True, 1 False
+            if len(delta_action_mask) != 16:
+                 # Reconstruct the mask assuming 7 DoF for position/orientation, 1 for gripper (per arm)
+                 # [L_pos_ori(7), L_gripper(1), R_pos_ori(7), R_gripper(1)]
+                 # The 'make_bool_mask(n, -1)' is T*n + F*1
+                 # For 16 dimensions, we need to manually create the mask:
+                 
+                 # 7 Delta (T) + 1 Absolute (F) for Left arm
+                 left_arm_mask = [True] * 7 + [False]
+                 # 7 Delta (T) + 1 Absolute (F) for Right arm
+                 right_arm_mask = [True] * 7 + [False]
+                 
+                 delta_action_mask = left_arm_mask + right_arm_mask
+
+            data_transforms = data_transforms.push(
+                inputs=[_transforms.DeltaActions(delta_action_mask)],
+                outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+            )
+
+        # --- 3. Model Transforms ---
+        # Handles tokenizing, etc.
+        model_transforms = ModelTransformFactory()(model_config)
+
+        # Return the final DataConfig
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+        )
 
 @dataclasses.dataclass(frozen=True)
 class RLDSDroidDataConfig(DataConfigFactory):
@@ -489,12 +576,12 @@ class TrainConfig:
     # Base directory for config assets (e.g., norm stats).
     assets_base_dir: str = "./assets"
     # Base directory for checkpoints.
-    checkpoint_base_dir: str = "./checkpoints"
+    checkpoint_base_dir: str = "/gemini/space/tong/checkpoints"
 
     # Random seed that will be used by random generators during training.
     seed: int = 42
     # Global batch size.
-    batch_size: int = 32
+    batch_size: int = 2
     # Number of workers to use for the data loader. Increasing this number will speed up data loading but
     # will increase memory and CPU usage.
     num_workers: int = 2
@@ -504,7 +591,7 @@ class TrainConfig:
     # How often (in steps) to log training metrics.
     log_interval: int = 100
     # How often (in steps) to save checkpoints.
-    save_interval: int = 1000
+    save_interval: int = 5000
     # If set, any existing checkpoints matching step % keep_period == 0 will not be deleted.
     keep_period: int | None = 5000
 
@@ -523,7 +610,7 @@ class TrainConfig:
     # device memory will be reduced but training could potentially be slower.
     # eg. if total device is 4 and fsdp devices is 2; then the model will shard to 2 devices and run
     # data parallel between 2 groups of devices.
-    fsdp_devices: int = 1
+    fsdp_devices: int = 4
 
     @property
     def assets_dirs(self) -> pathlib.Path:
@@ -641,7 +728,7 @@ _CONFIGS = [
     # the comments below.
     TrainConfig(
         # Change the name to reflect your model and dataset.
-        name="pi0_libero",
+        name="pi0_libero_test",
         # Here you define the model config -- In this example we use pi0 as the model
         # architecture and perform *full* finetuning. in the examples below we show how to modify
         # this to perform *low-memory* (LORA) finetuning and use pi0-FAST as an alternative architecture.
@@ -650,7 +737,7 @@ _CONFIGS = [
         # dataset. For your own dataset, you can change the repo_id to point to your dataset.
         # Also modify the DataConfig to use the new config you made for your dataset above.
         data=LeRobotLiberoDataConfig(
-            repo_id="physical-intelligence/libero",
+            repo_id="Loki0929/unplug_charger",
             base_config=DataConfig(
                 # This flag determines whether we load the prompt (i.e. the task instruction) from the
                 # ``task`` field in the LeRobot dataset. If set to True, the prompt will show up in
@@ -732,14 +819,14 @@ _CONFIGS = [
         ema_decay=None,
     ),
     TrainConfig(
-        name="pi05_libero",
+        name="pi05_libero_test",
         model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False),
         data=LeRobotLiberoDataConfig(
-            repo_id="physical-intelligence/libero",
+            repo_id="Loki0929/unplug_charger",
             base_config=DataConfig(prompt_from_task=True),
             extra_delta_transform=False,
         ),
-        batch_size=256,
+        batch_size=32,
         lr_schedule=_optimizer.CosineDecaySchedule(
             warmup_steps=10_000,
             peak_lr=5e-5,
@@ -750,7 +837,53 @@ _CONFIGS = [
         ema_decay=0.999,
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         pytorch_weight_path="/path/to/your/pytorch_weight_path",
-        num_train_steps=30_000,
+        num_train_steps=300_000,
+    ),
+
+    TrainConfig(
+        name="pi05_umi",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False),
+        data=LeRobotUmiDataConfig(
+            repo_id="Loki0929/teleai_umi",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=False,
+        ),
+        batch_size=32,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=1_000_000,
+            decay_lr=5e-5,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        ema_decay=0.999,
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        pytorch_weight_path="/path/to/your/pytorch_weight_path",
+        num_train_steps=300_000,
+    ),
+
+    # LORA finetuning of Pi0.5 on Libero as a test.
+    TrainConfig(
+        name="pi05_libero_test_1",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False),
+        data=LeRobotLiberoDataConfig(
+            repo_id="Loki0929/unplug_charger",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=False,
+        ),
+        batch_size=16,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=1_000_000,
+            decay_lr=5e-5,
+        ),
+        freeze_filter=pi0_config.Pi0Config(paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora").get_freeze_filter(),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        ema_decay=0.999,
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        pytorch_weight_path="/path/to/your/pytorch_weight_path",
+        num_train_steps=300_000,
     ),
     #
     # Fine-tuning Aloha configs.
