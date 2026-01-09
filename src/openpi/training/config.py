@@ -574,7 +574,7 @@ class TrainConfig:
     data: DataConfigFactory = dataclasses.field(default_factory=FakeDataConfig)
 
     # Base directory for config assets (e.g., norm stats).
-    assets_base_dir: str = "./assets"
+    assets_base_dir: str = "/gemini-2/user/private/openpi/assets"
     # Base directory for checkpoints.
     checkpoint_base_dir: str = "/gemini/space/tong/checkpoints"
 
@@ -591,7 +591,7 @@ class TrainConfig:
     # How often (in steps) to log training metrics.
     log_interval: int = 100
     # How often (in steps) to save checkpoints.
-    save_interval: int = 5000
+    save_interval: int = 10000
     # If set, any existing checkpoints matching step % keep_period == 0 will not be deleted.
     keep_period: int | None = 5000
 
@@ -846,7 +846,7 @@ _CONFIGS = [
         data=LeRobotUmiDataConfig(
             repo_id="Loki0929/teleai_umi",
             base_config=DataConfig(prompt_from_task=True),
-            extra_delta_transform=False,
+            extra_delta_transform=True,
         ),
         batch_size=32,
         lr_schedule=_optimizer.CosineDecaySchedule(
@@ -884,6 +884,41 @@ _CONFIGS = [
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         pytorch_weight_path="/path/to/your/pytorch_weight_path",
         num_train_steps=300_000,
+    ),
+
+
+    TrainConfig(
+        name="pi05_libero_lora_v1",
+
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False,
+                                   paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"),
+
+        data=LeRobotLiberoDataConfig(
+            repo_id="physical-intelligence/libero",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=30_000,
+        # Again, make sure to match the model config above when extracting the freeze filter
+        # that specifies which parameters should be frozen during LoRA finetuning.
+        freeze_filter=
+        pi0_config.Pi0Config(pi05=True, action_horizon=10,
+                             discrete_state_input=False,
+                             paligemma_variant="gemma_2b_lora",
+                             action_expert_variant="gemma_300m_lora"
+                             ).get_freeze_filter(),
+        # Turn off EMA for LoRA finetuning.
+        ema_decay=None,
+        wandb_enabled=True,
+        # batch_size=32, #use fault 32
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=1_000_000,
+            decay_lr=5e-5,
+        ),
     ),
     #
     # Fine-tuning Aloha configs.

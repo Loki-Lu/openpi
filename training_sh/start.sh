@@ -36,4 +36,4 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 \
 XLA_PYTHON_CLIENT_PREALLOCATE=false \
 XLA_PYTHON_CLIENT_MEM_FRACTION=0.99 \
 TENSORSTORE_CONTEXT='{"file_io_locking": false}' \
-uv run scripts/train.py pi05_umi --exp-name=trash --overwrite
+uv run ../scripts/train.py pi05_umi --exp-name=fruit --resume
