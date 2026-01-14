@@ -10,6 +10,7 @@ import polars as pl
 import rich
 import tqdm
 import tyro
+from r1pro_TeleAI.vla_planner import VLAPlanner
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ class EnvMode(enum.Enum):
     ALOHA_SIM = "aloha_sim"
     DROID = "droid"
     LIBERO = "libero"
+    UMI = "umi"
 
 
 @dataclasses.dataclass
@@ -34,7 +36,7 @@ class Args:
     # API key to use for the server.
     api_key: str | None = None
     # Number of steps to run the policy for.
-    num_steps: int = 20
+    num_steps: int = 20000
     # Path to save the timings to a parquet file. (e.g., timing.parquet)
     timing_file: pathlib.Path | None = None
     # Environment to run the policy in.
@@ -120,6 +122,7 @@ def main(args: Args) -> None:
         EnvMode.ALOHA_SIM: _random_observation_aloha,
         EnvMode.DROID: _random_observation_droid,
         EnvMode.LIBERO: _random_observation_libero,
+        EnvMode.UMI: _random_observation_umi,
     }[args.env]
 
     policy = _websocket_client_policy.WebsocketClientPolicy(
@@ -178,6 +181,21 @@ def _random_observation_libero() -> dict:
         "observation/state": np.random.rand(8),
         "observation/image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
         "observation/wrist_image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
+        "prompt": "do something",
+    }
+
+def _random_observation_umi() -> dict:
+
+    xht = VLAPlanner()
+    state=xht.get_act()
+    print("state_list:",state)
+
+
+    return {
+        "observation/state": state,
+        "observation/images/front": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
+        "observation/images/left_wrist": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
+        "observation/images/right_wrist": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
         "prompt": "do something",
     }
 
