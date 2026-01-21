@@ -51,7 +51,7 @@ print(f"\n[CONFIG] DELETE_BAD_SESSIONS={DELETE_BAD_SESSIONS}, DRY_RUN_ONLY={DRY_
 # ---------------------- 配置区 ------------------------------
 # ============================================================
 
-ROOT = "/gemini-2/user/private/data/data_umi_fruit"  # 数据根目录
+ROOT = "/gemini-1/space/tong/data/sponge"  # 数据根目录
 hands = [
     "left_hand_250801DR48FP25002070",
     "right_hand_250801DR48FP25002073",
