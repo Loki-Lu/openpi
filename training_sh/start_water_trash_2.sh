@@ -31,9 +31,10 @@
 # XLA_FLAGS="--xla_gpu_autotune_level=0" \
 # XLA_FLAGS="--xla_gpu_strict_conv_algorithm_picker=false" \
 # JAX_ENABLE_CUDA_GRAPH=0 \
-export HF_LEROBOT_HOME=/gemini-2/user/private/data/data_umi_fruit/lerobot
-CUDA_VISIBLE_DEVICES=0,1,2,3 \
+export HF_LEROBOT_HOME=/gemini-1/space/tong/data/water_trash/lerobot
+export OPENPI_DATA_HOME=/gemini-1/space/tong/models/jaxpi
+CUDA_VISIBLE_DEVICES=0 \
 XLA_PYTHON_CLIENT_PREALLOCATE=false \
 XLA_PYTHON_CLIENT_MEM_FRACTION=0.99 \
 TENSORSTORE_CONTEXT='{"file_io_locking": false}' \
-uv run ../scripts/train.py pi05_umi --exp-name=fruit --resume
+uv run ../scripts/train.py pi0_lora_umi --exp-name=water_trash_2 --overwrite --batch_size=128 --num_train_steps=100_000

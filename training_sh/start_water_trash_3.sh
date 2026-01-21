@@ -27,13 +27,14 @@
 
 # # 启动训练
 # uv run scripts/train.py pi05_libero_test --exp-name=my_experiment --overwrite
-export ORION_CAP_001=1   
-export RION_GMEM_CONTROL=v1
 
-XLA_FLAGS="--xla_gpu_autotune_level=0" \
+# XLA_FLAGS="--xla_gpu_autotune_level=0" \
+# XLA_FLAGS="--xla_gpu_strict_conv_algorithm_picker=false" \
+# JAX_ENABLE_CUDA_GRAPH=0 \
+export HF_LEROBOT_HOME=/gemini-1/space/tong/data/water_trash/lerobot
+export OPENPI_DATA_HOME=/gemini-1/space/tong/models/jaxpi
 CUDA_VISIBLE_DEVICES=0,1,2,3 \
-XLA_FLAGS="--xla_gpu_strict_conv_algorithm_picker=false" \
-JAX_ENABLE_CUDA_GRAPH=0 \
 XLA_PYTHON_CLIENT_PREALLOCATE=false \
-XLA_PYTHON_CLIENT_MEM_FRACTION=0.8 \
-uv run scripts/train.py pi05_libero_test --exp-name=my_experiment --overwrite
+XLA_PYTHON_CLIENT_MEM_FRACTION=0.99 \
+TENSORSTORE_CONTEXT='{"file_io_locking": false}' \
+uv run ../scripts/train.py pi0_umi --exp-name=water_trash_3 --overwrite --batch_size=32 --num_train_steps=300_000
